@@ -77,7 +77,7 @@ def get_posts(search_term):
 
 if __name__ == '__main__':
     get_posts('chikungunya')
-    df.to_csv('promed_chikungunya.csv', sep='\t')
+    df.to_csv('promed_chikungunyaw.csv', sep='\t')
 
 
 # malaria eda
