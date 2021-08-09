@@ -12,15 +12,20 @@ from epitator.count_annotator import CountAnnotator
 from epitator.date_annotator import DateAnnotator
 from epitator.geoname_annotator import GeonameAnnotator
 
-# import json
-# from datetime import datetime
-# from transformers import BartForConditionalGeneration, BartTokenizer
+import re
+from datetime import datetime
+from geopy import Nominatim
+from geopy.extra.rate_limiter import RateLimiter
+locator = Nominatim(user_agent="ppcoom")
+geocode = RateLimiter(locator.geocode, min_delay_seconds=1/20)
+dengue_regex = re.compile(r'([A-Za-z ]+).*\[w\/e (.+)\] \/ (.+) \/ (.+) \/ (.+) \/ (.+) \/ (.+)', re.MULTILINE)
 
 import pandas as pd
 from tqdm import tqdm
 tqdm.pandas()
 
-# setup our BART transformer summarization model
+# from transformers import BartForConditionalGeneration, BartTokenizer
+# # setup our BART transformer summarization model
 # print('loading transformers')
 # tokenizer = BartTokenizer.from_pretrained('facebook/bart-large-cnn')
 # model = BartForConditionalGeneration.from_pretrained('facebook/bart-large-cnn').cuda()
@@ -95,6 +100,27 @@ def epitator_extract(txt, max_ents=1):
         dates_end[:max_ents],
     ])
 
+def parse_dengue(row):
+    return pd.DataFrame([(
+        *row[2:],
+        match[0].strip(),
+        pd.NA if re.match(r'\d+ \w{3} \w{4}', re.sub(r'[^\w ]+', '', match[1])) is None 
+            else datetime.strptime(re.sub(r'[^\w ]+', '', match[1]), r'%d %b %Y'),
+        match[2],
+        *[pd.NA if not match[i].isnumeric() else int(match[i].replace(' ', '')) for i in range(3, 7)])
+        for match in dengue_regex.findall(row['content'])],
+        columns=[
+        *row[2:].keys(),
+        'location_name',
+        'dates_start',
+        'serotype',
+        'total_cases',
+        'confirmed_cases',
+        'severe_cases',
+        'deaths'
+    ])
+
+
 
 if __name__ == '__main__':
     print('Opening df')
@@ -102,7 +128,10 @@ if __name__ == '__main__':
     print('Cleaning')
     df['content'] = df['content'].progress_apply(clean)
     df = df[df['content'].str.contains('|'.join(('case', 'cases', 'death', 'deaths')))]
-    df = df[df['disease'] != 'dengue'] # ignore dengue for now, need to come up with parser for table
+
+    dengue_df = df[df['disease'] == 'dengue']
+    df = df[df['disease'] != 'dengue']
+
     # df['summary'] = df['content'].progress_apply(summarizer)
     print('Extracting')
     df[['admin1_code',
@@ -122,4 +151,16 @@ if __name__ == '__main__':
     df = df.applymap(lambda x: x[0] if isinstance(x, list) and len(x) > 0 else x)
     df = df.applymap(lambda y: pd.NA if isinstance(y, (list, str)) and len(y) == 0 else y)
     df = df.reset_index(drop=True)
-    df.to_feather('dataset.v1.1.feather')
+
+    dengue_df = pd.concat([parse_dengue(row) for _, row in tqdm(dengue_df.iterrows())])
+    dengue_df['location'] = dengue_df['location_name'].progress_apply(geocode)
+    dengue_df['point'] = dengue_df['location'].progress_apply(lambda loc: tuple(loc.point) if loc else None)
+    dengue_df[['location_lat', 'location_lon', 'altitude']] = pd.DataFrame(dengue_df['point'].tolist(), index=dengue_df.index)
+    dengue_df = dengue_df.drop(['location', 'point', 'altitude'], axis=1)
+    dengue_df = dengue_df.rename({'confirmed_cases', 'cases'})
+    dengue_df = dengue_df.reset_index(drop=True)
+
+    full_df = pd.concat([df, dengue_df], axis=0, ignore_index=True)
+    full_df.to_feather('dataset.v1.2.feather')
+    full_df = full_df.drop(['Unnamed: 0', 'index'], axis=1)
+    full_df.to_feather('dataset.v1.2.feather')
