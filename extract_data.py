@@ -107,7 +107,7 @@ def parse_dengue(row):
         pd.NA if re.match(r'\d+ \w{3} \w{4}', re.sub(r'[^\w ]+', '', match[1])) is None 
             else datetime.strptime(re.sub(r'[^\w ]+', '', match[1]), r'%d %b %Y'),
         match[2],
-        *[pd.NA if not match[i].isnumeric() else int(match[i].replace(' ', '')) for i in range(3, 7)])
+        *[pd.NA if not match[i].replace(' ', '').isnumeric() else int(match[i].replace(' ', '')) for i in range(3, 7)])
         for match in dengue_regex.findall(row['content'])],
         columns=[
         *row[2:].keys(),
@@ -120,11 +120,10 @@ def parse_dengue(row):
         'deaths'
     ])
 
-
-
 if __name__ == '__main__':
     print('Opening df')
     df = pd.read_feather('combined_df_anomaly.feather')
+    
     print('Cleaning')
     df['content'] = df['content'].progress_apply(clean)
     df = df[df['content'].str.contains('|'.join(('case', 'cases', 'death', 'deaths')))]
@@ -152,6 +151,7 @@ if __name__ == '__main__':
     df = df.applymap(lambda y: pd.NA if isinstance(y, (list, str)) and len(y) == 0 else y)
     df = df.reset_index(drop=True)
 
+    print('Parsing dengue')
     dengue_df = pd.concat([parse_dengue(row) for _, row in tqdm(dengue_df.iterrows())])
     dengue_df['location'] = dengue_df['location_name'].progress_apply(geocode)
     dengue_df['point'] = dengue_df['location'].progress_apply(lambda loc: tuple(loc.point) if loc else None)
@@ -160,6 +160,7 @@ if __name__ == '__main__':
     dengue_df = dengue_df.rename({'confirmed_cases', 'cases'})
     dengue_df = dengue_df.reset_index(drop=True)
 
+    print('Finishing up')
     full_df = pd.concat([df, dengue_df], axis=0, ignore_index=True)
     full_df.to_feather('dataset.v1.2.feather')
     full_df = full_df.drop(['Unnamed: 0', 'index'], axis=1)
