@@ -1,6 +1,6 @@
+import sys
 import requests
 from bs4 import BeautifulSoup as bs
-# from requests.api import get
 import pandas as pd
 import concurrent.futures
 import threading
@@ -76,8 +76,6 @@ def get_posts(search_term):
             pass # hack so we can sigexit through the main thread
 
 if __name__ == '__main__':
-    get_posts('chikungunya')
-    df.to_csv('promed_chikungunyaw.csv', sep='\t')
-
-
-# malaria eda
+    search_term = sys.argv[1]
+    get_posts(search_term)
+    df.to_csv(f'promed_{search_term}.csv', sep='\t')
